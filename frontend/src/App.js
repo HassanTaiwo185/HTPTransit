@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import MapView from './components/MapView';
 import SearchBar from './components/SearchBar';
 import ArrivalSheet from './components/ArrivalSheet';
@@ -9,6 +9,15 @@ import useNearbyStops from './hooks/useNearbyStops';
 import useLiveStop from './hooks/useLiveStop';
 import usePlan from './hooks/usePlan';
 import { getTripStops } from './services/api';
+
+function useDebounce(value, delay = 2000) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(t);
+  }, [value, delay]);
+  return debounced;
+}
 
 function App() {
   const [location, setLocation]                   = useState(null);
@@ -45,9 +54,15 @@ function App() {
     if (stops.length > 0 && !selectedStop) setSelectedStop(stops[0]);
   }, [stops]);
 
-  // single hook — replaces both useArrivals and useLiveStop
-  // only active when arrival sheet is visible, pauses otherwise
+  // only poll when the arrival sheet is actually visible
   const isArrivalSheetVisible = !!(selectedStop && !showPlan && !selectedLeg);
+
+  // debounce the stop id — prevents rapid-fire fetches when GPS jitters
+  // or the user taps between stops quickly
+  const debouncedStopId = useDebounce(
+    isArrivalSheetVisible ? selectedStop?.stop_id : null,
+    2000
+  );
 
   const {
     arrivals,
@@ -55,7 +70,7 @@ function App() {
     loading: arrivalsLoading,
     crowding,
     notifications,
-  } = useLiveStop(isArrivalSheetVisible ? selectedStop?.stop_id : null);
+  } = useLiveStop(debouncedStopId);
 
   const { plans, loading: planLoading, error: planError, fetchPlan, clearPlan } = usePlan();
 
