@@ -1,92 +1,87 @@
-const API_BASE = "http://localhost:8000/api";
+const API_BASE = process.env.REACT_APP_BACKEND_URL
+  ? `${process.env.REACT_APP_BACKEND_URL}/api`
+  : "http://localhost:8000/api";
 
-/* ----------------------------- PLAN TRIP ----------------------------- */
-/* ----------------------------- PLAN TRIP ----------------------------- */
+const WS_BASE = process.env.REACT_APP_BACKEND_URL
+  ? process.env.REACT_APP_BACKEND_URL.replace(/^http/, "ws")
+  : "ws://localhost:8000";
+
 export async function getPlan(data) {
-  // Ensure the keys match the Pydantic model exactly
   const payload = {
-    from_lat: data.origin.lat,
-    from_lon: data.origin.lon,
-    to_lat: data.destination.lat,
-    to_lon: data.destination.lon,
-    mode: "transit",
-    num_results: 3
+    from_lat:       data.origin.lat,
+    from_lon:       data.origin.lon,
+    to_lat:         data.destination.lat,
+    to_lon:         data.destination.lon,
+    mode:           "transit",
+    num_results:    3,
+    departure_time: data.departureTime ?? null,   // null = leave now (realtime)
   };
-
   const res = await fetch(`${API_BASE}/plan`, {
-    method: "POST",
+    method:  "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body:    JSON.stringify(payload),
   });
-
   if (!res.ok) throw new Error("Failed to fetch trip plan");
   return res.json();
 }
 
-
-/* --------------------------- NEARBY STOPS --------------------------- */
 export async function getNearbyStops(lat, lon) {
-  const res = await fetch(
-    `${API_BASE}/stops/nearby?lat=${lat}&lon=${lon}`
-  );
-
-  if (!res.ok) {
-    throw new Error("Failed to fetch nearby stops");
-  }
-
+  const res = await fetch(`${API_BASE}/stops/nearby?lat=${lat}&lon=${lon}`);
+  if (!res.ok) throw new Error("Failed to fetch nearby stops");
   return res.json();
 }
 
-
-/* --------------------------- STOP ARRIVALS --------------------------- */
 export async function getArrivals(stopId) {
   const res = await fetch(`${API_BASE}/stop/${stopId}/arrivals`);
-
-  if (!res.ok) {
-    throw new Error("Failed to fetch arrivals");
-  }
-
+  if (!res.ok) throw new Error("Failed to fetch arrivals");
   return res.json();
 }
 
-
-/* ------------------------- CROWDING PREDICTION ------------------------ */
 export async function predictCrowding(routeId, hour) {
-  const res = await fetch(
-    `${API_BASE}/predict/crowding?route_id=${routeId}&hour=${hour}`
-  );
-
-  if (!res.ok) {
-    throw new Error("Failed to predict crowding");
-  }
-
+  const res = await fetch(`${API_BASE}/predict/crowding?route_id=${routeId}&hour=${hour}`);
+  if (!res.ok) throw new Error("Failed to predict crowding");
   return res.json();
 }
 
+export async function getLiveCrowding(rtTripId) {
+  if (!rtTripId) return { level: "unknown", source: "unavailable" };
+  const res = await fetch(`${API_BASE}/vehicle/${encodeURIComponent(rtTripId)}/crowding`);
+  if (!res.ok) return { level: "unknown", source: "unavailable" };
+  return res.json();
+}
 
-/* ------------------------- LIVE STOP WEBSOCKET ------------------------ */
-export function connectLiveStop(stopId, onMessage) {
-  const ws = new WebSocket(`ws://localhost:8000/ws/stop/${stopId}`);
+export async function getPredictedCrowding(stopId, departureTs) {
+  if (!stopId || !departureTs) return { level: "unknown", source: "unavailable" };
+  const res = await fetch(
+    `${API_BASE}/predict/crowding/trip?stop_id=${stopId}&departure_ts=${departureTs}`
+  );
+  if (!res.ok) return { level: "unknown", source: "unavailable" };
+  return res.json();
+}
 
-  ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    onMessage(data);
-  };
-
+export function connectLiveStop(stopId, destStopId = null, onMessage) {
+  const query = destStopId ? `?dest_stop_id=${destStopId}` : "";
+  const ws = new WebSocket(`${WS_BASE}/ws/live/${stopId}${query}`);
+  ws.onmessage = (event) => { onMessage(JSON.parse(event.data)); };
   return ws;
 }
 
+export async function getTripStops(tripId, departureTs = null) {
+  if (!tripId) throw new Error("tripId required");
+  const query = departureTs ? `?departure_ts=${departureTs}` : "";
+  const res = await fetch(`${API_BASE}/trips/${tripId}/stops${query}`);
+  if (!res.ok) throw new Error("Failed to fetch trip stops");
+  return res.json();
+}
 
-export async function getTripStops(tripId) {
-  if (!tripId) {
-    throw new Error("tripId required");
-  }
-
-  const res = await fetch(`${API_BASE}/trip/${tripId}/stops`);
-
-  if (!res.ok) {
-    throw new Error("Failed to fetch trip stops");
-  }
-
+export async function getVehiclePositions(globalRouteId, directionId = null) {
+  if (!globalRouteId) return { vehicles: [], available: false };
+  const params = new URLSearchParams();
+  if (directionId !== null) params.set("direction_id", directionId);
+  const query = params.toString() ? `?${params}` : "";
+  const res = await fetch(
+    `${API_BASE}/route/${encodeURIComponent(globalRouteId)}/vehicles${query}`
+  );
+  if (!res.ok) return { vehicles: [], available: false };
   return res.json();
 }

@@ -2,68 +2,69 @@ const API_BASE = process.env.REACT_APP_BACKEND_URL
   ? `${process.env.REACT_APP_BACKEND_URL}/api`
   : "http://localhost:8000/api";
 
-/* --------------------------- PLAN TRIP --------------------------- */
-export async function getPlan(fromLat, fromLon, toLat, toLon) {
+const WS_BASE = process.env.REACT_APP_BACKEND_URL
+  ? process.env.REACT_APP_BACKEND_URL.replace(/^http/, "ws")
+  : "ws://localhost:8000";
+
+export async function getPlan(data) {
+  const payload = {
+    from_lat: data.origin.lat,
+    from_lon: data.origin.lon,
+    to_lat: data.destination.lat,
+    to_lon: data.destination.lon,
+    mode: "transit",
+    num_results: 3
+  };
   const res = await fetch(`${API_BASE}/plan`, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({
-      from_lat:    fromLat,
-      from_lon:    fromLon,
-      to_lat:      toLat,
-      to_lon:      toLon,
-      mode:        'transit',
-      num_results: 3,
-    }),
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
   });
-  if (!res.ok) throw await res.json();
+  if (!res.ok) throw new Error("Failed to fetch trip plan");
   return res.json();
 }
 
-/* --------------------------- NEARBY STOPS --------------------------- */
 export async function getNearbyStops(lat, lon) {
   const res = await fetch(`${API_BASE}/stops/nearby?lat=${lat}&lon=${lon}`);
   if (!res.ok) throw new Error("Failed to fetch nearby stops");
   return res.json();
 }
 
-/* --------------------------- STOP ARRIVALS --------------------------- */
 export async function getArrivals(stopId) {
   const res = await fetch(`${API_BASE}/stop/${stopId}/arrivals`);
   if (!res.ok) throw new Error("Failed to fetch arrivals");
   return res.json();
 }
 
-/* --------------------------- PREDICT CROWDING --------------------------- */
-export async function predictCrowding(data) {
-  const res = await fetch(`${API_BASE}/predict`, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify(data),
-  });
-  if (!res.ok) throw await res.json();
+export async function predictCrowding(routeId, hour) {
+  const res = await fetch(`${API_BASE}/predict/crowding?route_id=${routeId}&hour=${hour}`);
+  if (!res.ok) throw new Error("Failed to predict crowding");
   return res.json();
 }
 
-/* --------------------------- TRIP STOPS --------------------------- */
-export async function getTripStops(tripId, startTime) {
+export function connectLiveStop(stopId, destStopId = null, onMessage) {
+  const query = destStopId ? `?dest_stop_id=${destStopId}` : "";
+  const ws = new WebSocket(`${WS_BASE}/ws/live/${stopId}${query}`);
+  ws.onmessage = (event) => { onMessage(JSON.parse(event.data)); };
+  return ws;
+}
+
+export async function getTripStops(tripId) {
   if (!tripId) throw new Error("tripId required");
-  const url = startTime
-    ? `${API_BASE}/trips/${tripId}/stops?start_time=${startTime}`
-    : `${API_BASE}/trips/${tripId}/stops`;
-  const res = await fetch(url);
+  // FIX 3: correct path is /trips/ not /trip/
+  const res = await fetch(`${API_BASE}/trips/${tripId}/stops`);
   if (!res.ok) throw new Error("Failed to fetch trip stops");
   return res.json();
 }
 
-/* --------------------------- WEBSOCKET --------------------------- */
-export function connectLiveStop(stopId, destStopId, onMessage) {
-  const ws = new WebSocket(
-    destStopId
-      ? `ws://localhost:8000/ws/live/${stopId}?dest_stop_id=${destStopId}`
-      : `ws://localhost:8000/ws/live/${stopId}`
+export async function getVehiclePositions(globalRouteId, directionId = null) {
+  if (!globalRouteId) return { vehicles: [], available: false };
+  const params = new URLSearchParams();
+  if (directionId !== null) params.set("direction_id", directionId);
+  const query = params.toString() ? `?${params}` : "";
+  const res = await fetch(
+    `${API_BASE}/route/${encodeURIComponent(globalRouteId)}/vehicles${query}`
   );
-  ws.onmessage = (e) => onMessage(JSON.parse(e.data));
-  ws.onerror   = (e) => console.error('WS error:', e);
-  return ws;
+  if (!res.ok) return { vehicles: [], available: false };
+  return res.json();
 }

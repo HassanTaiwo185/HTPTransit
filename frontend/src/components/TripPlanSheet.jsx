@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import CrowdingBadge from './CrowdingBadge';
 
 export default function TripPlanSheet({
   plans,
@@ -8,196 +7,276 @@ export default function TripPlanSheet({
   onClose,
   onPlanSelect,
   onLegSelect,
+  onWalkLegSelect,
+  selectedWalkLeg,
   selectedPlanIndex,
 }) {
-  const [expanded, setExpanded] = useState(0);
+  const [expandedSet, setExpandedSet] = useState(new Set([0]));
 
   if (!plans && !loading) return null;
 
-  const formatTime = (timestamp) => {
-    if (!timestamp) return '';
-    return new Date(timestamp * 1000).toLocaleTimeString([], {
-      hour:   '2-digit',
-      minute: '2-digit',
+  const formatTime = (ts) =>
+    ts ? new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+
+  const formatDur = (min) => {
+    if (!min) return '';
+    const m = Math.round(min);
+    return m < 60 ? `${m} min` : `${Math.floor(m / 60)}h ${m % 60}m`;
+  };
+
+  const handlePlanSelect = (i) => {
+    onPlanSelect?.(i);
+    setExpandedSet((prev) => {
+      const next = new Set(prev);
+      next.add(i);
+      return next;
     });
   };
 
-  const getCrowding = (timestamp) => {
-    if (!timestamp) return 'normal';
-    const hour = new Date(timestamp * 1000).getHours();
-    if ((hour >= 7 && hour <= 9) || (hour >= 16 && hour <= 19)) return 'overcrowded';
-    if (hour >= 10 && hour <= 15) return 'normal';
-    return 'not_crowded';
+  const toggleExpanded = (i) => {
+    setExpandedSet((prev) => {
+      const next = new Set(prev);
+      next.has(i) ? next.delete(i) : next.add(i);
+      return next;
+    });
   };
 
-  return (
-    <div className="absolute bottom-0 left-0 right-0 z-[1000] bg-white rounded-t-3xl shadow-2xl px-4 pt-3 pb-10 max-h-[92vh] overflow-y-auto">
+  const WalkIcon = ({ active }) => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+      stroke={active ? 'white' : '#3b82f6'} strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="4" r="1.5" fill={active ? 'white' : '#3b82f6'} stroke="none" />
+      <path d="M12 6.5l-2.5 4.5h5M9.5 11L8 19M14.5 11L16 19" />
+    </svg>
+  );
 
-      {/* Handle bar */}
-      <div className="flex justify-center mb-3">
-        <div className="w-10 h-1 bg-gray-200 rounded-full" />
+  // Height logic:
+  // - walk leg focused → very small, just enough to show the active leg + scroll hint
+  // - default → 55% so map is well visible
+  // - user can scroll the sheet to see more legs
+  const sheetHeight = selectedWalkLeg ? '28vh' : '58vh';
+
+  return (
+    <div
+      className="fixed bottom-0 left-0 right-0 z-[1000] flex flex-col bg-white rounded-t-2xl shadow-2xl transition-all duration-300"
+      style={{ height: sheetHeight }}
+    >
+      {/* Handle — tap to toggle between compact and tall */}
+      <div
+        className="flex justify-center pt-2.5 pb-1 shrink-0 cursor-pointer"
+        onClick={() => {
+          // if walk leg active, tapping handle dismisses walk leg
+          if (selectedWalkLeg) onWalkLegSelect?.(selectedWalkLeg);
+        }}
+      >
+        <div className="w-8 h-1 rounded-full bg-blue-200" />
       </div>
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-base font-bold text-gray-900">🗺️ Trip Options</h2>
+      <div className="flex items-center justify-between px-4 py-2 border-b border-blue-50 shrink-0">
+        <span className="text-[15px] font-bold text-gray-900">Trip Options</span>
         <button
           onClick={onClose}
-          className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500"
-        >×</button>
+          className="w-7 h-7 rounded-full bg-blue-50 flex items-center justify-center text-blue-500 text-xs font-bold hover:bg-blue-100 transition-colors"
+        >
+          ✕
+        </button>
       </div>
 
-      {/* Loading */}
-      {loading && (
-        <div className="flex items-center justify-center py-8">
-          <div className="w-6 h-6 border-2 border-green-500 border-t-transparent rounded-full animate-spin" />
-          <span className="ml-2 text-sm text-gray-400">Finding routes...</span>
-        </div>
-      )}
-
-      {/* Error */}
-      {error && (
-        <div className="bg-red-50 rounded-2xl px-4 py-3 mb-4">
-          <p className="text-red-600 text-sm">{error}</p>
-        </div>
-      )}
-
-      {/* Plans */}
-      {!loading && plans?.map((plan, i) => {
-        const isSelected  = selectedPlanIndex === i;
-        const isExpanded  = expanded === i;
-        const walkLegs    = plan.legs?.filter(l => l.mode === 'walk') || [];
-        const totalWalk   = walkLegs.reduce((sum, l) => sum + l.distance_m, 0);
-        const crowding    = getCrowding(plan.start_time);
-
-        return (
-          <div
-            key={i}
-            className={`mb-4 rounded-2xl overflow-hidden border-2 transition-all
-              ${isSelected ? 'border-green-500' : 'border-gray-100'}`}
-          >
-            {/* Plan summary header */}
-            <div
-              className={`px-4 py-3 cursor-pointer
-                ${isSelected ? 'bg-green-50' : 'bg-gray-50'}`}
-              onClick={() => {
-                onPlanSelect && onPlanSelect(i);
-                setExpanded(isExpanded ? null : i);
-              }}
+      {/* Walk leg active — show a small summary pill + scroll hint */}
+      {selectedWalkLeg && (
+        <div className="px-3 pt-2 pb-1 shrink-0">
+          <div className="flex items-center gap-2 bg-blue-600 rounded-xl px-3 py-2">
+            <div className="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center shrink-0">
+              <WalkIcon active />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-white text-[12px] font-bold">
+                Walk {Math.round(selectedWalkLeg.distance_m)}m shown on map
+              </p>
+              <p className="text-blue-200 text-[10px]">
+                {formatTime(selectedWalkLeg.start_time)} – {formatTime(selectedWalkLeg.end_time)}
+                {' · '}{formatDur(selectedWalkLeg.duration_min)}
+              </p>
+            </div>
+            <button
+              onClick={() => onWalkLegSelect?.(selectedWalkLeg)}
+              className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center text-white text-xs font-bold shrink-0"
             >
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold text-gray-900">
-                      {formatTime(plan.start_time)}
+              ✕
+            </button>
+          </div>
+          <p className="text-[10px] text-blue-300 text-center mt-1.5">
+            Scroll up to see all trip options
+          </p>
+        </div>
+      )}
+
+      {/* Scrollable content */}
+      <div className="overflow-y-auto flex-1 px-3 py-2 space-y-2 pb-6">
+
+        {loading && (
+          <div className="flex items-center justify-center py-10 gap-3">
+            <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+            <span className="text-sm text-blue-400 font-medium">Finding routes…</span>
+          </div>
+        )}
+
+        {error && (
+          <div className="bg-red-50 border border-red-100 rounded-2xl px-4 py-3">
+            <p className="text-red-400 text-sm">{error}</p>
+          </div>
+        )}
+
+        {!loading && plans?.map((plan, i) => {
+          const isSelected = selectedPlanIndex === i;
+          const isExpanded = expandedSet.has(i);
+          const isStatic   = plan.source === 'static';
+
+          return (
+            <div
+              key={i}
+              className={`rounded-2xl overflow-hidden border transition-all ${
+                isSelected
+                  ? 'border-blue-300 shadow-md shadow-blue-100'
+                  : 'border-blue-100 shadow-sm'
+              }`}
+            >
+              {/* Plan summary row */}
+              <button
+                className={`w-full text-left px-4 py-3 transition-colors ${
+                  isSelected ? 'bg-blue-600' : 'bg-white hover:bg-blue-50'
+                }`}
+                onClick={() => {
+                  handlePlanSelect(i);
+                  toggleExpanded(i);
+                }}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`text-[14px] font-bold ${isSelected ? 'text-white' : 'text-gray-900'}`}>
+                      {formatTime(plan.start_time)} – {formatTime(plan.end_time)}
                     </span>
-                    <span className="text-gray-300">→</span>
-                    <span className="text-sm font-bold text-gray-900">
-                      {formatTime(plan.end_time)}
-                    </span>
-                    <span className="text-xs text-gray-400">
-                      {Math.round(plan.duration_min)} min
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                      isSelected ? 'bg-blue-500 text-blue-100' : 'bg-blue-50 text-blue-500'
+                    }`}>
+                      {formatDur(plan.duration_min)}
                     </span>
                   </div>
-                  {totalWalk > 0 && (
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      Walk {Math.round(totalWalk)}m total
-                    </p>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <CrowdingBadge level={crowding} />
-                  <span className="text-gray-400 text-sm">
+                  <span className={`text-xs ${isSelected ? 'text-blue-300' : 'text-blue-200'}`}>
                     {isExpanded ? '▲' : '▼'}
                   </span>
                 </div>
-              </div>
 
-              {/* Route chips */}
-              <div className="flex gap-1.5 mt-2 flex-wrap">
-                {plan.legs?.map((leg, j) => (
-                  <span
-                    key={j}
-                    className={`text-xs px-2 py-0.5 rounded-lg font-medium
-                      ${leg.mode === 'transit'
-                        ? 'bg-green-100 text-green-700'
-                        : 'bg-gray-200 text-gray-500'}`}
-                  >
-                    {leg.mode === 'transit'
-                      ? `🚌 ${leg.route || 'Bus'}`
-                      : `🚶 ${Math.round(leg.distance_m)}m`}
+                {isStatic && (
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full mt-1 inline-block ${
+                    isSelected ? 'bg-blue-500 text-blue-100' : 'bg-blue-50 text-blue-400'
+                  }`}>
+                    Scheduled Only
                   </span>
-                ))}
-              </div>
-            </div>
+                )}
 
-            {/* Expanded legs */}
-            {isExpanded && (
-              <div className="bg-white border-t border-gray-100">
-                {plan.legs?.map((leg, j) => (
-                  leg.mode === 'transit' ? (
+                {/* Leg pills */}
+                <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                  {plan.legs?.map((leg, j) => (
+                    <span key={j} className={`text-[11px] px-2.5 py-0.5 rounded-full font-bold ${
+                      leg.mode === 'transit'
+                        ? (isSelected ? 'bg-white text-blue-600' : 'bg-blue-600 text-white')
+                        : (isSelected ? 'bg-blue-500 text-white' : 'bg-blue-50 text-blue-500')
+                    }`}>
+                      {leg.mode === 'transit' ? leg.route : `${Math.round(leg.distance_m)}m walk`}
+                    </span>
+                  ))}
+                </div>
+              </button>
 
-                    // ── Transit leg — tappable ──
-                    <div
-                      key={j}
-                      className="flex items-start gap-3 cursor-pointer bg-green-50 mx-3 my-2 rounded-xl px-3 py-3 active:bg-green-100"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onLegSelect && onLegSelect(leg);
-                      }}
-                    >
-                      <div className="w-9 h-9 rounded-xl bg-green-600 flex items-center justify-center shrink-0">
-                        <span className="text-white text-xs font-bold">{leg.route}</span>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          {leg.is_real_time
-                            ? <span className="text-xs text-green-600 font-semibold">● Live</span>
-                            : <span className="text-xs text-gray-400">○ Scheduled</span>
-                          }
-                          <CrowdingBadge level={getCrowding(leg.start_time)} />
+              {/* Expanded legs */}
+              {isExpanded && (
+                <div className="border-t border-blue-50 space-y-1.5 p-2 bg-blue-50/30">
+                  {plan.legs?.map((leg, j) => {
+                    if (leg.mode === 'transit') {
+                      const showLive = leg.is_real_time && !isStatic;
+                      return (
+                        <button
+                          key={j}
+                          type="button"
+                          className="w-full text-left flex items-center gap-3 bg-white rounded-xl px-3 py-2.5 shadow-sm border border-blue-100 hover:border-blue-400 hover:shadow-md active:bg-blue-50 transition-all cursor-pointer"
+                          onClick={(e) => { e.stopPropagation(); onLegSelect?.(leg); }}
+                        >
+                          <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center shrink-0 shadow-sm shadow-blue-200">
+                            <span className="text-white text-xs font-bold leading-none">{leg.route}</span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 mb-0.5">
+                              {showLive ? (
+                                <span className="text-[10px] font-bold text-green-500 flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-ping inline-block" />
+                                  Live
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-semibold text-blue-300">Scheduled</span>
+                              )}
+                            </div>
+                            <p className="text-[13px] font-semibold text-gray-800">
+                              Departs {formatTime(leg.start_time)}
+                            </p>
+                            {leg.headsign && (
+                              <p className="text-[11px] text-gray-400 truncate">{leg.headsign}</p>
+                            )}
+                            <p className="text-[10px] text-blue-500 font-semibold mt-0.5">
+                              View stops →
+                            </p>
+                          </div>
+                          <span className="text-[13px] font-bold text-blue-600 shrink-0">
+                            {formatDur(leg.duration_min)}
+                          </span>
+                        </button>
+                      );
+                    }
+
+                    // Walk leg
+                    const isWalkActive = selectedWalkLeg?.start_time === leg.start_time;
+                    return (
+                      <button
+                        key={j}
+                        type="button"
+                        className={`w-full text-left flex items-center gap-3 rounded-xl px-3 py-2.5 border transition-all cursor-pointer ${
+                          isWalkActive
+                            ? 'bg-blue-600 border-blue-600 shadow-md shadow-blue-200'
+                            : 'bg-white border-blue-100 hover:border-blue-300'
+                        }`}
+                        onClick={(e) => { e.stopPropagation(); onWalkLegSelect?.(leg); }}
+                      >
+                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                          isWalkActive ? 'bg-white/20' : 'bg-blue-50'
+                        }`}>
+                          <WalkIcon active={isWalkActive} />
                         </div>
-                        <p className="text-xs text-gray-700 font-medium mt-0.5">
-                          Ride {leg.duration_min} min · departs {formatTime(leg.start_time)}
-                        </p>
-                        {leg.headsign && (
-                          <p className="text-xs text-gray-400 mt-0.5">
-                            → {leg.headsign}
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-[13px] font-semibold ${isWalkActive ? 'text-white' : 'text-gray-800'}`}>
+                            Walk {Math.round(leg.distance_m)}m
                           </p>
-                        )}
-                        <p className="text-xs text-green-500 font-medium mt-1">
-                          Tap to see all stops →
-                        </p>
-                      </div>
-                      <span className="text-xs font-bold text-gray-700 shrink-0">
-                        {leg.duration_min} min
-                      </span>
-                    </div>
-
-                  ) : (
-
-                    // ── Walk leg ──
-                    <div key={j} className="flex items-start gap-3 mx-3 my-2 px-3 py-2">
-                      <div className="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center shrink-0">
-                        <span className="text-sm">🚶</span>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium text-gray-600">
-                          Walk {Math.round(leg.distance_m)}m
-                        </p>
-                        <p className="text-xs text-gray-400 mt-0.5">
-                          {formatTime(leg.start_time)} → {formatTime(leg.end_time)} · {leg.duration_min} min
-                        </p>
-                      </div>
-                    </div>
-
-                  )
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })}
+                          <p className={`text-[11px] ${isWalkActive ? 'text-blue-200' : 'text-blue-400'}`}>
+                            {formatTime(leg.start_time)} – {formatTime(leg.end_time)}
+                          </p>
+                          {!isWalkActive && (
+                            <p className="text-[10px] text-blue-400 font-medium mt-0.5">
+                              Tap to show on map
+                            </p>
+                          )}
+                        </div>
+                        <span className={`text-[13px] font-bold shrink-0 ${isWalkActive ? 'text-white' : 'text-blue-600'}`}>
+                          {formatDur(leg.duration_min)}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -7,8 +7,11 @@ from fastapi.responses import JSONResponse
 from app.core.limiter import RateLimitExceeded
 from app.data.loader import load_all
 from app.ml.predictor import load_model
-from app.routes import arrivals, predict, nearby, plan, trips # Consolidated
+from app.routes import arrivals, predict, nearby, plan, trips, vehicles  # add vehicles
 from app.ws import live
+from app.routes import arrivals, predict, nearby, plan, trips, vehicles, crowding
+
+
 
 logging.basicConfig(level=logging.INFO)
 
@@ -21,9 +24,9 @@ async def lifespan(app):
 app = FastAPI(title="Durham Transit API", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
-    CORSMiddleware, 
-    allow_origins=["*"], 
-    allow_methods=["*"], 
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
     allow_headers=["*"]
 )
 
@@ -37,7 +40,9 @@ app.include_router(predict.router, prefix="/api")
 app.include_router(nearby.router, prefix="/api")
 app.include_router(plan.router, prefix="/api")
 app.include_router(trips.router, prefix="/api")
+app.include_router(vehicles.router, prefix="/api")  # add this
 app.include_router(live.router)
+app.include_router(crowding.router, prefix="/api")
 
 @app.get("/")
 def health():
