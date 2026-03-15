@@ -127,9 +127,7 @@ export default function RouteStopSheet({ leg, onClose, vehicles = [] }) {
           onClick={onClose}
           className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-500 text-sm font-bold shrink-0 transition-colors"
         >←</button>
-        <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center shrink-0 shadow-sm">
-          <span className="text-white text-sm font-bold tracking-tight">{leg.route}</span>
-        </div>
+        
         <div className="min-w-0">
           <p className="text-[15px] font-semibold text-gray-900 tracking-tight">
             DRT {leg.route} Bus
