@@ -6,10 +6,9 @@ import TripPlanSheet from './components/TripPlanSheet';
 import RouteStopSheet from './components/RouteStopSheet';
 import NotificationToast from './components/NotificationToast';
 import useNearbyStops from './hooks/useNearbyStops';
-import useArrivals from './hooks/useArrivals';
-import usePlan from './hooks/usePlan';
 import useLiveStop from './hooks/useLiveStop';
-import { getTripStops, getVehiclePositions } from './services/api';
+import usePlan from './hooks/usePlan';
+import { getTripStops } from './services/api';
 
 function App() {
   const [location, setLocation]                   = useState(null);
@@ -22,7 +21,6 @@ function App() {
   const [selectedWalkLeg, setSelectedWalkLeg]     = useState(null);
   const [tripStops, setTripStops]                 = useState([]);
   const [vehicles, setVehicles]                   = useState([]);
-  const vehicleIntervalRef                        = useRef(null);
 
   // get user location — once only
   useEffect(() => {
@@ -47,14 +45,17 @@ function App() {
     if (stops.length > 0 && !selectedStop) setSelectedStop(stops[0]);
   }, [stops]);
 
-  // arrivals — only fetched once when stop selected, NOT polling
-  const { arrivals, loading: arrivalsLoading } = useArrivals(selectedStop?.stop_id);
-
-  // WebSocket live updates — only active when arrival sheet is visible
+  // single hook — replaces both useArrivals and useLiveStop
+  // only active when arrival sheet is visible, pauses otherwise
   const isArrivalSheetVisible = !!(selectedStop && !showPlan && !selectedLeg);
-  const { crowding, notifications } = useLiveStop(
-    isArrivalSheetVisible ? selectedStop?.stop_id : null
-  );
+
+  const {
+    arrivals,
+    stopName,
+    loading: arrivalsLoading,
+    crowding,
+    notifications,
+  } = useLiveStop(isArrivalSheetVisible ? selectedStop?.stop_id : null);
 
   const { plans, loading: planLoading, error: planError, fetchPlan, clearPlan } = usePlan();
 
@@ -80,8 +81,6 @@ function App() {
       .catch(() => setTripStops([]));
   }, [selectedLeg]);
 
-  
-
   const handleArrivalSelect = (arrival) => {
     const startTime = Math.floor(Date.now() / 1000) + Math.round(arrival.arrives_in_min * 60);
     setSelectedLeg({
@@ -98,12 +97,6 @@ function App() {
       polyline:        '',
     });
   };
-
-
-  
-
-
-  
 
   const handleClosePlan = () => {
     setShowPlan(false);
@@ -183,6 +176,20 @@ function App() {
           onFromSelect={(from) => { if (from) setLocation(from); }}
         />
       )}
+
+      <a
+        href="https://transitapp.com"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="absolute bottom-3 right-3 z-[3000]"
+      >
+        <img
+          src="/transit-api-badge@3x.png"
+          alt="Powered by Transit"
+          className="h-8 opacity-90 hover:opacity-100 transition"
+        />
+      </a>
+
     </div>
   );
 }
