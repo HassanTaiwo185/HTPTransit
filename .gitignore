@@ -1,3 +1,5 @@
 .DS_Store
 frontend/.env
 .env
+backend/data/canada_polyline/
+backend/data/*.csv
