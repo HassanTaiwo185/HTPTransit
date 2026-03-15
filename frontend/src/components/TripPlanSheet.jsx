@@ -11,6 +11,7 @@ export default function TripPlanSheet({
   selectedWalkLeg,
   selectedPlanIndex,
 }) {
+  // Start with all plans collapsed — user taps to expand any of them
   const [expandedSet, setExpandedSet] = useState(new Set([0]));
 
   if (!plans && !loading) return null;
@@ -24,19 +25,19 @@ export default function TripPlanSheet({
     return m < 60 ? `${m} min` : `${Math.floor(m / 60)}h ${m % 60}m`;
   };
 
-  const handlePlanSelect = (i) => {
+  const minsUntil = (ts) =>
+    ts ? Math.max(0, Math.round((ts * 1000 - Date.now()) / 60000)) : null;
+
+  // Single handler — selects the plan AND toggles its expansion
+  const handlePlanClick = (i) => {
     onPlanSelect?.(i);
     setExpandedSet((prev) => {
       const next = new Set(prev);
-      next.add(i);
-      return next;
-    });
-  };
-
-  const toggleExpanded = (i) => {
-    setExpandedSet((prev) => {
-      const next = new Set(prev);
-      next.has(i) ? next.delete(i) : next.add(i);
+      if (next.has(i)) {
+        next.delete(i);   // collapse if already open
+      } else {
+        next.add(i);      // expand if closed
+      }
       return next;
     });
   };
@@ -50,10 +51,6 @@ export default function TripPlanSheet({
     </svg>
   );
 
-  // Height logic:
-  // - walk leg focused → very small, just enough to show the active leg + scroll hint
-  // - default → 55% so map is well visible
-  // - user can scroll the sheet to see more legs
   const sheetHeight = selectedWalkLeg ? '28vh' : '58vh';
 
   return (
@@ -61,13 +58,10 @@ export default function TripPlanSheet({
       className="fixed bottom-0 left-0 right-0 z-[1000] flex flex-col bg-white rounded-t-2xl shadow-2xl transition-all duration-300"
       style={{ height: sheetHeight }}
     >
-      {/* Handle — tap to toggle between compact and tall */}
+      {/* Handle */}
       <div
         className="flex justify-center pt-2.5 pb-1 shrink-0 cursor-pointer"
-        onClick={() => {
-          // if walk leg active, tapping handle dismisses walk leg
-          if (selectedWalkLeg) onWalkLegSelect?.(selectedWalkLeg);
-        }}
+        onClick={() => { if (selectedWalkLeg) onWalkLegSelect?.(selectedWalkLeg); }}
       >
         <div className="w-8 h-1 rounded-full bg-blue-200" />
       </div>
@@ -83,7 +77,7 @@ export default function TripPlanSheet({
         </button>
       </div>
 
-      {/* Walk leg active — show a small summary pill + scroll hint */}
+      {/* Walk leg summary pill */}
       {selectedWalkLeg && (
         <div className="px-3 pt-2 pb-1 shrink-0">
           <div className="flex items-center gap-2 bg-blue-600 rounded-xl px-3 py-2">
@@ -106,13 +100,11 @@ export default function TripPlanSheet({
               ✕
             </button>
           </div>
-          <p className="text-[10px] text-blue-300 text-center mt-1.5">
-            Scroll up to see all trip options
-          </p>
+          <p className="text-[10px] text-blue-300 text-center mt-1.5">Scroll up to see all trip options</p>
         </div>
       )}
 
-      {/* Scrollable content */}
+      {/* Scrollable list */}
       <div className="overflow-y-auto flex-1 px-3 py-2 space-y-2 pb-6">
 
         {loading && (
@@ -131,26 +123,21 @@ export default function TripPlanSheet({
         {!loading && plans?.map((plan, i) => {
           const isSelected = selectedPlanIndex === i;
           const isExpanded = expandedSet.has(i);
-          const isStatic   = plan.source === 'static';
 
           return (
             <div
               key={i}
               className={`rounded-2xl overflow-hidden border transition-all ${
-                isSelected
-                  ? 'border-blue-300 shadow-md shadow-blue-100'
-                  : 'border-blue-100 shadow-sm'
+                isSelected ? 'border-blue-300 shadow-md shadow-blue-100' : 'border-blue-100 shadow-sm'
               }`}
             >
-              {/* Plan summary row */}
+              {/* Plan header — single tap selects + toggles */}
               <button
+                type="button"
                 className={`w-full text-left px-4 py-3 transition-colors ${
                   isSelected ? 'bg-blue-600' : 'bg-white hover:bg-blue-50'
                 }`}
-                onClick={() => {
-                  handlePlanSelect(i);
-                  toggleExpanded(i);
-                }}
+                onClick={() => handlePlanClick(i)}
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 flex-wrap">
@@ -163,18 +150,13 @@ export default function TripPlanSheet({
                       {formatDur(plan.duration_min)}
                     </span>
                   </div>
-                  <span className={`text-xs ${isSelected ? 'text-blue-300' : 'text-blue-200'}`}>
+                  {/* Chevron — clearly shows expanded/collapsed state */}
+                  <span className={`text-xs font-bold transition-transform ${
+                    isSelected ? 'text-blue-300' : 'text-blue-200'
+                  }`}>
                     {isExpanded ? '▲' : '▼'}
                   </span>
                 </div>
-
-                {isStatic && (
-                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full mt-1 inline-block ${
-                    isSelected ? 'bg-blue-500 text-blue-100' : 'bg-blue-50 text-blue-400'
-                  }`}>
-                    Scheduled Only
-                  </span>
-                )}
 
                 {/* Leg pills */}
                 <div className="flex items-center gap-1.5 mt-2 flex-wrap">
@@ -195,7 +177,9 @@ export default function TripPlanSheet({
                 <div className="border-t border-blue-50 space-y-1.5 p-2 bg-blue-50/30">
                   {plan.legs?.map((leg, j) => {
                     if (leg.mode === 'transit') {
-                      const showLive = leg.is_real_time && !isStatic;
+                      const isLive = !!leg.is_real_time;
+                      const mins   = minsUntil(leg.start_time);
+
                       return (
                         <button
                           key={j}
@@ -206,20 +190,32 @@ export default function TripPlanSheet({
                           <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center shrink-0 shadow-sm shadow-blue-200">
                             <span className="text-white text-xs font-bold leading-none">{leg.route}</span>
                           </div>
+
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5 mb-0.5">
-                              {showLive ? (
-                                <span className="text-[10px] font-bold text-green-500 flex items-center gap-1">
-                                  <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-ping inline-block" />
-                                  Live
+                            {isLive ? (
+                              <span className="text-[10px] font-bold text-green-500 flex items-center gap-1 mb-0.5">
+                                <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-ping inline-block" />
+                                Live
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-semibold text-blue-300 block mb-0.5">
+                                Scheduled
+                              </span>
+                            )}
+
+                            {isLive ? (
+                              <p className="text-[13px] font-bold text-gray-900">
+                                {mins} min
+                                <span className="text-[11px] font-normal text-gray-400 ml-1">
+                                  · {formatTime(leg.start_time)}
                                 </span>
-                              ) : (
-                                <span className="text-[10px] font-semibold text-blue-300">Scheduled</span>
-                              )}
-                            </div>
-                            <p className="text-[13px] font-semibold text-gray-800">
-                              Departs {formatTime(leg.start_time)}
-                            </p>
+                              </p>
+                            ) : (
+                              <p className="text-[13px] font-semibold text-gray-800">
+                                {formatTime(leg.start_time)}
+                              </p>
+                            )}
+
                             {leg.headsign && (
                               <p className="text-[11px] text-gray-400 truncate">{leg.headsign}</p>
                             )}
@@ -227,6 +223,7 @@ export default function TripPlanSheet({
                               View stops →
                             </p>
                           </div>
+
                           <span className="text-[13px] font-bold text-blue-600 shrink-0">
                             {formatDur(leg.duration_min)}
                           </span>
@@ -260,9 +257,7 @@ export default function TripPlanSheet({
                             {formatTime(leg.start_time)} – {formatTime(leg.end_time)}
                           </p>
                           {!isWalkActive && (
-                            <p className="text-[10px] text-blue-400 font-medium mt-0.5">
-                              Tap to show on map
-                            </p>
+                            <p className="text-[10px] text-blue-400 font-medium mt-0.5">Tap to show on map</p>
                           )}
                         </div>
                         <span className={`text-[13px] font-bold shrink-0 ${isWalkActive ? 'text-white' : 'text-blue-600'}`}>

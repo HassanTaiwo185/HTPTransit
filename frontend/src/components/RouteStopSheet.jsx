@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getTripStops } from '../services/api';
 
-// Haversine distance in meters between two lat/lon points
 function distanceMeters(lat1, lon1, lat2, lon2) {
   const R = 6371000;
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -14,35 +13,25 @@ function distanceMeters(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// Find index of the stop nearest to the vehicle
 function findNearestStopIndex(stops, vehicles) {
   if (!vehicles?.length || !stops?.length) return -1;
-
-  // Match by rt_trip_id first if possible — use first matched vehicle
-  // Fall back to closest vehicle by distance
   let bestIndex = -1;
   let bestDist  = Infinity;
-
   vehicles.forEach((v) => {
     if (!v.latitude || !v.longitude) return;
     stops.forEach((stop, i) => {
       if (!stop.stop_lat || !stop.stop_lon) return;
       const d = distanceMeters(v.latitude, v.longitude, stop.stop_lat, stop.stop_lon);
-      if (d < bestDist) {
-        bestDist  = d;
-        bestIndex = i;
-      }
+      if (d < bestDist) { bestDist = d; bestIndex = i; }
     });
   });
-
-  // Only highlight if vehicle is within 200m of a stop
   return bestDist < 200 ? bestIndex : -1;
 }
 
 export default function RouteStopSheet({ leg, onClose, vehicles = [] }) {
-  const [stops, setStops]                         = useState([]);
-  const [loading, setLoading]                     = useState(false);
-  const [error, setError]                         = useState(null);
+  const [stops,             setStops]             = useState([]);
+  const [loading,           setLoading]           = useState(false);
+  const [error,             setError]             = useState(null);
   const [selectedDeparture, setSelectedDeparture] = useState(0);
 
   const formatTime = (ts) => {
@@ -57,9 +46,13 @@ export default function RouteStopSheet({ leg, onClose, vehicles = [] }) {
       return { label: 'Busy',        color: 'text-orange-500 bg-orange-50' };
     if (hour >= 10 && hour <= 15)
       return { label: 'Moderate',    color: 'text-yellow-600 bg-yellow-50' };
-    return   { label: 'Not Crowded', color: 'text-green-600  bg-green-50'  };
+    return   { label: 'Not Crowded', color: 'text-green-600 bg-green-50' };
   };
 
+  // Build departure slots:
+  // - slot 0: real departure from leg
+  // - slots 1 & 2: use next_departures from leg if available, otherwise estimate +30/+60
+  const nextDeps = leg?.next_departures || [];
   const departures = leg ? [
     {
       mins:         Math.max(0, Math.round((leg.start_time * 1000 - Date.now()) / 60000)),
@@ -68,36 +61,58 @@ export default function RouteStopSheet({ leg, onClose, vehicles = [] }) {
       start_time:   leg.start_time,
     },
     {
-      mins:         Math.max(0, Math.round((leg.start_time * 1000 - Date.now()) / 60000)) + 30,
-      is_real_time: false,
-      status:       'Scheduled',
-      start_time:   leg.start_time + 1800,
+      mins:         nextDeps[0]
+                      ? Math.max(0, Math.round((nextDeps[0].start_time * 1000 - Date.now()) / 60000))
+                      : Math.max(0, Math.round((leg.start_time * 1000 - Date.now()) / 60000)) + 30,
+      is_real_time: nextDeps[0]?.is_real_time ?? false,
+      status:       nextDeps[0]?.is_real_time ? 'Live' : 'Scheduled',
+      start_time:   nextDeps[0]?.start_time ?? (leg.start_time + 1800),
     },
     {
-      mins:         Math.max(0, Math.round((leg.start_time * 1000 - Date.now()) / 60000)) + 60,
-      is_real_time: false,
-      status:       'Scheduled',
-      start_time:   leg.start_time + 3600,
+      mins:         nextDeps[1]
+                      ? Math.max(0, Math.round((nextDeps[1].start_time * 1000 - Date.now()) / 60000))
+                      : Math.max(0, Math.round((leg.start_time * 1000 - Date.now()) / 60000)) + 60,
+      is_real_time: nextDeps[1]?.is_real_time ?? false,
+      status:       nextDeps[1]?.is_real_time ? 'Live' : 'Scheduled',
+      start_time:   nextDeps[1]?.start_time ?? (leg.start_time + 3600),
     },
   ] : [];
 
+  // Always load stops from the real trip_id — same stops regardless of which
+  // departure is selected (same route, same stop sequence)
   useEffect(() => {
-    if (!leg?.trip_id) return;
+    if (!leg?.trip_id) {
+      if (leg?.stop_times?.length) setStops(leg.stop_times);
+      return;
+    }
     setLoading(true);
     setError(null);
-    getTripStops(leg.trip_id, leg.start_time + selectedDeparture * 1800)
-      .then(data => setStops(data.stops || []))
-      .catch(() => setError('Could not load stops'))
+    getTripStops(leg.trip_id, leg.start_time, leg.route)
+      .then(data => {
+        const fetched = data.stops || [];
+        if (fetched.length > 0) {
+          setStops(fetched);
+        } else if (leg?.stop_times?.length) {
+          setStops(leg.stop_times);
+        }
+      })
+      .catch(() => {
+        if (leg?.stop_times?.length) {
+          setStops(leg.stop_times);
+        } else {
+          setError('Could not load stops');
+        }
+      })
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leg?.trip_id, selectedDeparture]);
+  }, [leg?.trip_id]);
 
   if (!leg) return null;
 
-  const activeDeparture  = departures[selectedDeparture];
-  const crowding         = getCrowdingLabel(activeDeparture?.start_time);
-  const busStopIndex     = findNearestStopIndex(stops, vehicles);
-  const hasBusPosition   = busStopIndex !== -1;
+  const activeDeparture = departures[selectedDeparture] ?? departures[0];
+  const crowding        = getCrowdingLabel(activeDeparture?.start_time);
+  const busStopIndex    = findNearestStopIndex(stops, vehicles);
+  const hasBusPosition  = busStopIndex !== -1;
 
   return (
     <div className="fixed bottom-0 left-0 right-0 z-[2000] bg-white rounded-t-2xl shadow-2xl flex flex-col h-[68vh]">
@@ -127,7 +142,6 @@ export default function RouteStopSheet({ leg, onClose, vehicles = [] }) {
           )}
         </div>
         <div className="ml-auto flex items-center gap-2 shrink-0">
-          {/* Live vehicle indicator */}
           {hasBusPosition && (
             <span className="flex items-center gap-1 text-[10px] font-semibold text-green-600 bg-green-50 px-2 py-1 rounded-full border border-green-100">
               <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block" />
@@ -145,23 +159,26 @@ export default function RouteStopSheet({ leg, onClose, vehicles = [] }) {
       {/* Scrollable content */}
       <div className="overflow-y-auto flex-1 pb-6">
 
-        {/* Departures */}
+        {/* Departures — 3 cards */}
         <div className="px-3 pt-3 pb-2">
           <div className="flex items-center justify-between mb-2 px-1">
             <span className="text-[12px] font-semibold text-gray-500 uppercase tracking-wide">
               Upcoming Departures
             </span>
-            <span className="text-[11px] text-gray-400">Every ~30 min</span>
+            <span className="text-[11px] text-gray-400">
+              {leg?.next_departures?.length ? 'Real-time' : 'Every ~30 min'}
+            </span>
           </div>
           <div className="grid grid-cols-3 gap-2">
             {departures.map((dep, i) => (
               <button
                 key={i}
                 onClick={() => setSelectedDeparture(i)}
-                className={`rounded-2xl px-2 py-3.5 text-center transition-all border
-                  ${i === selectedDeparture
+                className={`rounded-2xl px-2 py-3.5 text-center transition-all border ${
+                  i === selectedDeparture
                     ? 'bg-blue-600 border-blue-600 shadow-md shadow-blue-200'
-                    : 'bg-white border-gray-200 hover:border-blue-300 active:bg-blue-50'}`}
+                    : 'bg-white border-gray-200 hover:border-blue-300 active:bg-blue-50'
+                }`}
               >
                 <p className={`text-[17px] font-bold leading-none ${i === selectedDeparture ? 'text-white' : 'text-gray-900'}`}>
                   {dep.mins}
@@ -172,10 +189,11 @@ export default function RouteStopSheet({ leg, onClose, vehicles = [] }) {
                 <p className={`text-[11px] mt-1.5 font-medium ${i === selectedDeparture ? 'text-blue-100' : 'text-gray-500'}`}>
                   {formatTime(dep.start_time)}
                 </p>
-                <p className={`text-[10px] mt-0.5 font-semibold uppercase tracking-wide
-                  ${dep.is_real_time
+                <p className={`text-[10px] mt-0.5 font-semibold uppercase tracking-wide ${
+                  dep.is_real_time
                     ? i === selectedDeparture ? 'text-green-300' : 'text-green-500'
-                    : i === selectedDeparture ? 'text-blue-300' : 'text-gray-400'}`}>
+                    : i === selectedDeparture ? 'text-blue-300'  : 'text-gray-400'
+                }`}>
                   {dep.status}
                 </p>
               </button>
@@ -195,7 +213,7 @@ export default function RouteStopSheet({ leg, onClose, vehicles = [] }) {
           )}
         </div>
 
-        {/* Stops section */}
+        {/* Stops */}
         <div className="px-3">
           <div className="flex items-center justify-between mb-2 px-1">
             <span className="text-[12px] font-semibold text-gray-500 uppercase tracking-wide">
@@ -228,20 +246,17 @@ export default function RouteStopSheet({ leg, onClose, vehicles = [] }) {
           {!loading && stops.length > 0 && (
             <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
               {stops.map((stop, i) => {
-                const isFirst  = i === 0;
-                const isLast   = i === stops.length - 1;
+                const isFirst   = i === 0;
+                const isLast    = i === stops.length - 1;
                 const isBusHere = hasBusPosition && i === busStopIndex;
                 const isPassed  = hasBusPosition && i < busStopIndex;
 
                 return (
-                  <div key={stop.stop_id}>
-
-                    {/* Bus position indicator — inserted ABOVE the stop it's nearest to */}
+                  <div key={stop.stop_id || stop.global_stop_id || i}>
                     {isBusHere && (
                       <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 border-y border-green-100">
-                        {/* Bus icon */}
                         <div className="w-6 h-6 rounded-lg bg-green-500 flex items-center justify-center shrink-0">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
                             <rect x="1" y="5" width="22" height="13" rx="3" fill="white" opacity="0.9"/>
                             <rect x="3" y="7" width="7" height="5" rx="1" fill="#22c55e" opacity="0.8"/>
                             <rect x="14" y="7" width="7" height="5" rx="1" fill="#22c55e" opacity="0.8"/>
@@ -249,55 +264,42 @@ export default function RouteStopSheet({ leg, onClose, vehicles = [] }) {
                             <circle cx="18.5" cy="18.5" r="2" fill="white" stroke="#22c55e" strokeWidth="1.5"/>
                           </svg>
                         </div>
-                        <span className="text-[11px] font-semibold text-green-700">
-                          Bus is here
-                        </span>
-                        <span className="ml-auto text-[10px] text-green-500 font-medium">
-                          Live position
-                        </span>
+                        <span className="text-[11px] font-semibold text-green-700">Bus is here</span>
+                        <span className="ml-auto text-[10px] text-green-500 font-medium">Live position</span>
                       </div>
                     )}
 
                     <div className="flex items-stretch">
-                      {/* Timeline column */}
                       <div className="flex flex-col items-center w-10 shrink-0">
                         <div className={`w-0.5 flex-none h-4 ${isFirst ? 'bg-transparent' : isPassed ? 'bg-gray-200' : 'bg-blue-200'}`} />
-                        <div className={`rounded-full shrink-0 border-2 z-10 transition-all
-                          ${isFirst || isLast
+                        <div className={`rounded-full shrink-0 border-2 z-10 transition-all ${
+                          isFirst || isLast
                             ? 'w-3.5 h-3.5 bg-blue-600 border-blue-600'
                             : isPassed
                               ? 'w-2.5 h-2.5 bg-gray-300 border-gray-300'
-                              : 'w-2.5 h-2.5 bg-white border-blue-300'}`}
-                        />
+                              : 'w-2.5 h-2.5 bg-white border-blue-300'
+                        }`} />
                         {!isLast && (
                           <div className={`w-0.5 flex-1 min-h-[16px] ${isPassed ? 'bg-gray-200' : 'bg-blue-200'}`} />
                         )}
                         {isLast && <div className="h-4" />}
                       </div>
 
-                      {/* Stop row */}
-                      <div className={`flex-1 flex items-center justify-between py-2.5 pr-4
-                        ${!isLast ? 'border-b border-gray-50' : ''}`}
-                      >
-                        <p className={`text-[13px] leading-snug
-                          ${isFirst
-                            ? 'font-semibold text-gray-900'
-                            : isLast
-                              ? 'font-semibold text-blue-600'
-                              : isPassed
-                                ? 'text-gray-300'
-                                : 'text-gray-600'}`}
-                        >
+                      <div className={`flex-1 flex items-center justify-between py-2.5 pr-4 ${!isLast ? 'border-b border-gray-50' : ''}`}>
+                        <p className={`text-[13px] leading-snug ${
+                          isFirst  ? 'font-semibold text-gray-900' :
+                          isLast   ? 'font-semibold text-blue-600' :
+                          isPassed ? 'text-gray-300' :
+                                     'text-gray-600'
+                        }`}>
                           {stop.stop_name}
                         </p>
                         {stop.stop_time && (
-                          <p className={`text-[11px] font-semibold ml-2 shrink-0
-                            ${isFirst
-                              ? 'text-blue-600'
-                              : isPassed
-                                ? 'text-gray-300'
-                                : 'text-gray-400'}`}
-                          >
+                          <p className={`text-[11px] font-semibold ml-2 shrink-0 ${
+                            isFirst  ? 'text-blue-600' :
+                            isPassed ? 'text-gray-300' :
+                                       'text-gray-400'
+                          }`}>
                             {stop.stop_time}
                           </p>
                         )}

@@ -14,6 +14,7 @@ import { getTripStops, getVehiclePositions } from './services/api';
 function App() {
   const [location, setLocation]                   = useState(null);
   const [destination, setDestination]             = useState(null);
+  const [departureTime, setDepartureTime]         = useState(null);
   const [selectedStop, setSelectedStop]           = useState(null);
   const [showPlan, setShowPlan]                   = useState(false);
   const [selectedPlanIndex, setSelectedPlanIndex] = useState(0);
@@ -38,75 +39,70 @@ function App() {
     });
   }, []);
 
-  // Nearby stops
   const { stops } = useNearbyStops(location?.latitude, location?.longitude);
 
-  // Auto select closest stop
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (stops.length > 0 && !selectedStop) setSelectedStop(stops[0]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stops]);
 
-  // Arrivals for selected stop
   const { arrivals, loading: arrivalsLoading } = useArrivals(selectedStop?.stop_id);
-
-  // Live websocket
-  const { crowding, notifications } = useLiveStop(selectedStop?.stop_id);
-
-  // Trip plan
+  const { crowding, notifications }            = useLiveStop(selectedStop?.stop_id);
   const { plans, loading: planLoading, error: planError, fetchPlan, clearPlan } = usePlan();
 
-  // Fetch plan when destination selected
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (destination && location) {
-      fetchPlan(location.latitude, location.longitude, destination.latitude, destination.longitude);
+      fetchPlan(
+        location.latitude,
+        location.longitude,
+        destination.latitude,
+        destination.longitude,
+        departureTime,
+      );
       setShowPlan(true);
     }
-  }, [destination]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [destination, departureTime]);
 
-  // Fetch trip stops when transit leg selected
+  // Fetch trip stops — pass route as hint so backend can match live trip_ids
   useEffect(() => {
     if (!selectedLeg?.trip_id) { setTripStops([]); return; }
-    getTripStops(selectedLeg.trip_id, selectedLeg.start_time)
+    getTripStops(
+      selectedLeg.trip_id,
+      selectedLeg.start_time,
+      selectedLeg.route,        // ← route hint for live trips
+    )
       .then(data => setTripStops(data.stops || []))
       .catch(() => setTripStops([]));
   }, [selectedLeg]);
 
-  // Fetch + poll vehicle positions when a transit leg is selected
+  // Poll vehicle positions
   useEffect(() => {
-    if (!selectedLeg?.global_route_id) {
-      setVehicles([]);
-      return;
-    }
-
-    // Immediate fetch
+    if (!selectedLeg?.global_route_id) { setVehicles([]); return; }
     getVehiclePositions(selectedLeg.global_route_id)
       .then(data => setVehicles(data.vehicles || []))
       .catch(() => setVehicles([]));
-
-    // Poll every 15s for live updates
     const interval = setInterval(() => {
       getVehiclePositions(selectedLeg.global_route_id)
         .then(data => setVehicles(data.vehicles || []))
         .catch(() => {});
     }, 15000);
-
     return () => clearInterval(interval);
   }, [selectedLeg?.global_route_id]);
 
-  // Handle arrival row tap
   const handleArrivalSelect = (arrival) => {
+    const startTime = Math.floor(Date.now() / 1000) + Math.round(arrival.arrives_in_min * 60);
     setSelectedLeg({
       route:           arrival.route_short_name,
       route_color:     arrival.route_color || '#3b82f6',
       global_route_id: arrival.global_route_id || null,
       trip_id:         arrival.trip_id,
-      start_time:      Math.floor(Date.now() / 1000) + Math.round(arrival.arrives_in_min * 60),
-      is_real_time:    arrival.arrives_in_min < 5,
+      start_time:      startTime,
+      is_real_time:    arrival.is_real_time || false,
       headsign:        arrival.headsign,
       duration_min:    0,
       stop_times:      [],
+      next_departures: arrival.next_departures || [],
       polyline:        '',
     });
   };
@@ -115,6 +111,7 @@ function App() {
     setShowPlan(false);
     clearPlan();
     setDestination(null);
+    setDepartureTime(null);
     setSelectedPlanIndex(0);
     setSelectedLeg(null);
     setSelectedWalkLeg(null);
@@ -140,7 +137,6 @@ function App() {
 
       <NotificationToast notifications={notifications} />
 
-      {/* Route stop detail — shown when a transit leg is tapped */}
       {selectedLeg && (
         <RouteStopSheet
           leg={selectedLeg}
@@ -153,7 +149,6 @@ function App() {
         />
       )}
 
-      {/* Trip plan sheet — hidden while viewing a specific leg */}
       {showPlan && !selectedLeg && (
         <TripPlanSheet
           plans={plans}
@@ -170,7 +165,6 @@ function App() {
         />
       )}
 
-      {/* Arrival sheet */}
       {selectedStop && !showPlan && !selectedLeg && (
         <ArrivalSheet
           stop={selectedStop}
@@ -182,10 +176,12 @@ function App() {
         />
       )}
 
-      {/* Search bar */}
       {!showPlan && !selectedLeg && (
         <SearchBar
-          onDestinationSelect={(dest) => setDestination(dest)}
+          onDestinationSelect={(dest, depTs) => {
+            setDepartureTime(depTs ?? null);
+            setDestination(dest);
+          }}
           onFromSelect={(from) => { if (from) setLocation(from); }}
         />
       )}

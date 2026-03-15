@@ -14,7 +14,7 @@ export async function getPlan(data) {
     to_lon:         data.destination.lon,
     mode:           "transit",
     num_results:    3,
-    departure_time: data.departureTime ?? null,   // null = leave now (realtime)
+    departure_time: data.departureTime ?? null,  // ← was missing
   };
   const res = await fetch(`${API_BASE}/plan`, {
     method:  "POST",

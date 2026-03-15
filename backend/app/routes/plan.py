@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from typing import Optional
 from app.services.plan_service import get_plan
 from app.core.limiter import RateLimitExceeded
 
@@ -7,12 +8,13 @@ router = APIRouter(tags=["plan"])
 
 
 class PlanRequest(BaseModel):
-    from_lat:    float
-    from_lon:    float
-    to_lat:      float
-    to_lon:      float
-    mode:        str = "transit"
-    num_results: int = 3
+    from_lat:       float
+    from_lon:       float
+    to_lat:         float
+    to_lon:         float
+    mode:           str           = "transit"
+    num_results:    int           = 3
+    departure_time: Optional[int] = None   # unix timestamp, None = leave now
 
 
 @router.post("/plan")
@@ -28,12 +30,13 @@ async def plan_trip(req: PlanRequest):
 
     try:
         result = await get_plan(
-            from_lat    = req.from_lat,
-            from_lon    = req.from_lon,
-            to_lat      = req.to_lat,
-            to_lon      = req.to_lon,
-            mode        = req.mode,
-            num_results = req.num_results,
+            from_lat       = req.from_lat,
+            from_lon       = req.from_lon,
+            to_lat         = req.to_lat,
+            to_lon         = req.to_lon,
+            mode           = req.mode,
+            num_results    = req.num_results,
+            departure_time = req.departure_time,   # ← now forwarded
         )
 
         if not result.get("plans"):

@@ -11,6 +11,23 @@ from app.data import store
 
 logger = logging.getLogger(__name__)
 
+# Only override the API's is_real_time if the leg departs more than
+# this many seconds from now. Within 30 minutes, trust the API —
+# buses are tracked and dispatched before their scheduled departure.
+LIVE_HORIZON_SECONDS = 30 * 60
+
+
+def _can_be_live(leg_start_time: int | None) -> bool:
+    """
+    Returns True if the leg is close enough to now that live tracking
+    is plausible. We trust the API's is_real_time value inside this window.
+    Outside it (future scheduled trip) we force is_real_time=False.
+    """
+    if not leg_start_time:
+        return False
+    seconds_until = leg_start_time - datetime.now().timestamp()
+    return seconds_until <= LIVE_HORIZON_SECONDS
+
 
 def _find_trip_id_for_route(route_short_name, departure_timestamp=None):
     target_minutes = None
@@ -65,9 +82,6 @@ async def get_plan(from_lat, from_lon, to_lat, to_lon,
         "should_update_realtime": True,
     }
 
-    # The API uses `leave_time` for a requested departure timestamp.
-    # When this is a future time the API naturally returns is_real_time=False
-    # on each leg — no extra logic needed on our side.
     if departure_time is not None:
         params["leave_time"] = departure_time
 
@@ -99,28 +113,35 @@ async def get_plan(from_lat, from_lon, to_lat, to_lon,
                     route           = routes[0].get("route_short_name", "")
                     global_route_id = routes[0].get("global_route_id", "")
 
+                leg_start   = leg.get("start_time")
+                plausible   = _can_be_live(leg_start)
+
                 departures = leg.get("departures", [])
                 if departures:
                     departure    = departures[0]
-                    # Trust the API — it sets is_real_time=False for future trips
-                    is_real_time = departure.get("is_real_time", False)
+                    raw_realtime = departure.get("is_real_time", False)
+
+                    # Trust the API only when departure is within 30 minutes.
+                    # For anything further out, the API's live flag is noise.
+                    is_real_time = raw_realtime and plausible
 
                     plan_details = departure.get("plan_details", {})
                     arrival_item = plan_details.get("arrival_schedule_item", {})
                     headsign     = arrival_item.get("trip_headsign")
 
                     for item in plan_details.get("stop_schedule_items", []):
-                        arrival_ts = item.get("arrival_time")
+                        arrival_ts  = item.get("arrival_time")
+                        raw_stop_rt = item.get("is_real_time", False)
                         stop_times.append({
                             "global_stop_id": item.get("global_stop_id", ""),
                             "arrival_time":   arrival_ts,
                             "stop_time":      _format_timestamp(arrival_ts),
-                            "is_real_time":   item.get("is_real_time", False),
+                            "is_real_time":   raw_stop_rt and plausible,
                             "is_cancelled":   item.get("is_cancelled", False),
                         })
 
                 if route:
-                    trip_id = _find_trip_id_for_route(route, leg.get("start_time"))
+                    trip_id = _find_trip_id_for_route(route, leg_start)
 
             legs.append({
                 "mode":            leg.get("leg_mode"),
@@ -151,7 +172,7 @@ async def get_plan(from_lat, from_lon, to_lat, to_lon,
         if leg.get("global_route_id")
     })
 
-    logger.info("Fetched %d plans (leave_time=%s), route_ids: %s",
+    logger.info("Fetched %d plans (departure_time=%s), route_ids: %s",
                 len(plans), departure_time, route_ids)
 
     return {

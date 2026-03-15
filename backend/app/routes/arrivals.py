@@ -3,9 +3,8 @@ from app.services.arrivals_service import get_next_arrivals
 
 router = APIRouter(tags=["arrivals"])
 
-# Changed from "/arrivals/{stop_id}" to "/stop/{stop_id}/arrivals"
 @router.get("/stop/{stop_id}/arrivals")
-def get_arrivals(stop_id: str, limit: int = 5):
+async def get_arrivals(stop_id: str, limit: int = 3):
     if not stop_id or not stop_id.strip():
         raise HTTPException(
             status_code=400,
@@ -14,9 +13,9 @@ def get_arrivals(stop_id: str, limit: int = 5):
                 "message": "Stop ID cannot be empty"
             }
         )
-        
-    result = get_next_arrivals(stop_id, limit=limit)
-    
+
+    result = await get_next_arrivals(stop_id, limit=limit)
+
     if "error" in result:
         raise HTTPException(
             status_code=404,
