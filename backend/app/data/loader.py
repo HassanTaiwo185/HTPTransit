@@ -6,6 +6,8 @@ import logging
 from pathlib import Path
 
 from app.data import store
+from app.services.crowding_service import load_population_data
+
 
 logger = logging.getLogger(__name__)
 
@@ -99,4 +101,21 @@ def load_all():
     _load_stops()
     _load_routes()
     _load_calendar()
+    load_population_data()
     logger.info("=== Done ===")
+
+
+def _enrich_stop_route_counts():
+    """Add route_count to each stop in stop_info."""
+    logger.info("Enriching stops with route counts...")
+
+    stop_routes: dict[str, set] = {}
+    for trip_id, trip in store.trip_info.items():
+        route_id = trip.get("route_id")
+        for stop_id in store.trip_to_stops.get(trip_id, []):
+            stop_routes.setdefault(stop_id, set()).add(route_id)
+
+    for stop_id, info in store.stop_info.items():
+        info["route_count"] = len(stop_routes.get(stop_id, set())) or 1
+
+    logger.info("  → route_count added to %d stops", len(store.stop_info))

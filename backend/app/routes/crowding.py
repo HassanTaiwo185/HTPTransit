@@ -15,4 +15,6 @@ async def predict_trip_crowding(
         stop_lat     = stop.get("stop_lat"),
         stop_lon     = stop.get("stop_lon"),
         departure_ts = departure_ts,
+        route_count  = stop.get("route_count", 1),
+
     )
