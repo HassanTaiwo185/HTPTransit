@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import MapView from './components/MapView';
 import SearchBar from './components/SearchBar';
 import ArrivalSheet from './components/ArrivalSheet';
@@ -22,8 +22,9 @@ function App() {
   const [selectedWalkLeg, setSelectedWalkLeg]     = useState(null);
   const [tripStops, setTripStops]                 = useState([]);
   const [vehicles, setVehicles]                   = useState([]);
+  const vehicleIntervalRef                        = useRef(null);
 
-  // Get user location
+  // get user location — once only
   useEffect(() => {
     navigator.permissions?.query({ name: 'geolocation' }).then((result) => {
       if (result.state === 'granted') {
@@ -41,15 +42,23 @@ function App() {
 
   const { stops } = useNearbyStops(location?.latitude, location?.longitude);
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (stops.length > 0 && !selectedStop) setSelectedStop(stops[0]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stops]);
 
+  // arrivals — only fetched once when stop selected, NOT polling
   const { arrivals, loading: arrivalsLoading } = useArrivals(selectedStop?.stop_id);
-  const { crowding, notifications }            = useLiveStop(selectedStop?.stop_id);
+
+  // WebSocket live updates — only active when arrival sheet is visible
+  const isArrivalSheetVisible = !!(selectedStop && !showPlan && !selectedLeg);
+  const { crowding, notifications } = useLiveStop(
+    isArrivalSheetVisible ? selectedStop?.stop_id : null
+  );
+
   const { plans, loading: planLoading, error: planError, fetchPlan, clearPlan } = usePlan();
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (destination && location) {
       fetchPlan(
@@ -61,33 +70,46 @@ function App() {
       );
       setShowPlan(true);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [destination, departureTime]);
 
-  // Fetch trip stops — pass route as hint so backend can match live trip_ids
+  // fetch trip stops for polyline — only when leg selected
   useEffect(() => {
     if (!selectedLeg?.trip_id) { setTripStops([]); return; }
-    getTripStops(
-      selectedLeg.trip_id,
-      selectedLeg.start_time,
-      selectedLeg.route,        // ← route hint for live trips
-    )
+    getTripStops(selectedLeg.trip_id, selectedLeg.start_time, selectedLeg.route)
       .then(data => setTripStops(data.stops || []))
       .catch(() => setTripStops([]));
   }, [selectedLeg]);
 
-  // Poll vehicle positions
+  // vehicle polling — only when leg open, every 60s, stop immediately on close
   useEffect(() => {
-    if (!selectedLeg?.global_route_id) { setVehicles([]); return; }
+    if (vehicleIntervalRef.current) {
+      clearInterval(vehicleIntervalRef.current);
+      vehicleIntervalRef.current = null;
+    }
+
+    if (!selectedLeg?.global_route_id) {
+      setVehicles([]);
+      return;
+    }
+
+    // initial fetch
     getVehiclePositions(selectedLeg.global_route_id)
       .then(data => setVehicles(data.vehicles || []))
       .catch(() => setVehicles([]));
-    const interval = setInterval(() => {
+
+    // poll every 60s — only 1 call/min
+    vehicleIntervalRef.current = setInterval(() => {
       getVehiclePositions(selectedLeg.global_route_id)
         .then(data => setVehicles(data.vehicles || []))
         .catch(() => {});
-    }, 15000);
-    return () => clearInterval(interval);
+    }, 60000);
+
+    return () => {
+      if (vehicleIntervalRef.current) {
+        clearInterval(vehicleIntervalRef.current);
+        vehicleIntervalRef.current = null;
+      }
+    };
   }, [selectedLeg?.global_route_id]);
 
   const handleArrivalSelect = (arrival) => {
@@ -106,6 +128,12 @@ function App() {
       polyline:        '',
     });
   };
+
+
+  
+
+
+  
 
   const handleClosePlan = () => {
     setShowPlan(false);

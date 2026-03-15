@@ -18,7 +18,7 @@ from app.data         import store
 router = APIRouter(tags=["websocket"])
 logger = logging.getLogger(__name__)
 
-PUSH_INTERVAL = 30
+PUSH_INTERVAL = 60
 
 
 def _get_stop_sequence(trip_id: str, stop_id: str) -> int:

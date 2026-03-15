@@ -157,7 +157,7 @@ async def get_next_arrivals(stop_id: str, limit: int = 3) -> dict:
 
                 # Next 2 items = next_departures shown in RouteStopSheet
                 next_deps = []
-                for s in schedule_items[1:3]:
+                for s in schedule_items[1:4]:
                     s_dt = datetime.fromtimestamp(s["departure_time"])
                     next_deps.append({
                         "start_time":  s["departure_time"],

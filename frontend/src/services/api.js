@@ -139,3 +139,12 @@ export async function getVehiclePositions(globalRouteId, directionId = null) {
 
   return res.json();
 }
+
+export async function getCrowdingPrediction(stopId, departureTs) {
+  if (!stopId || !departureTs) return null;
+  const res = await fetch(
+    `${API_BASE}/predict/crowding/trip?stop_id=${stopId}&departure_ts=${Math.floor(departureTs)}`
+  );
+  if (!res.ok) return null;
+  return res.json();
+}
