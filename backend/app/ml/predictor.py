@@ -1,6 +1,10 @@
 """
 predictor.py — loads the trained model and predicts occupancy.
 Uses Durham schools geocoded data for schools_nearby feature.
+
+Features: time + location + context only.
+    No boardings/alightings — those are used to build y during training,
+    not available at prediction time.
 """
 import pickle
 import logging
@@ -40,7 +44,6 @@ def _haversine(lat1, lon1, lat2, lon2):
 
 
 def _is_in_durham(lat: float, lon: float) -> bool:
-    """Check if lat/lon is within Durham Region bounds."""
     return (
         DURHAM_BOUNDS["lat_min"] <= lat <= DURHAM_BOUNDS["lat_max"] and
         DURHAM_BOUNDS["lon_min"] <= lon <= DURHAM_BOUNDS["lon_max"]
@@ -48,7 +51,6 @@ def _is_in_durham(lat: float, lon: float) -> bool:
 
 
 def _count_schools_nearby(lat: float, lon: float, radius_km: float = 0.5) -> int:
-    """Count Durham schools within radius_km of a stop."""
     if durham_schools is None:
         return 0
     count = 0
@@ -96,17 +98,25 @@ def load_model():
 
 
 def predict(
-    boardings:          float,
-    alightings:         float,
-    stop_lat:           float = None,
-    stop_lon:           float = None,
-    route_count:        int   = 1,
+    stop_lat:           float,
+    stop_lon:           float,
     hour:               int   = 12,
     is_weekend:         int   = 0,
+    day_of_week:        int   = 0,
+    route_count:        int   = 1,
     population_density: float = 1800.0,
 ) -> dict:
     """
     Predict crowding level for a Durham Transit stop.
+
+    Inputs:
+        stop_lat / stop_lon  — where is the stop
+        hour                 — what hour of day (0–23)
+        is_weekend           — 1 if weekend, 0 if weekday
+        day_of_week          — 0=Mon … 6=Sun
+        route_count          — how many routes serve this stop
+        population_density   — area population density
+
     Returns level (not_crowded / normal / overcrowded) + confidence.
     """
 
@@ -118,15 +128,7 @@ def predict(
             "level":   None
         }
 
-    # ── lat/lon missing ───────────────────────────────────────
-    if stop_lat is None or stop_lon is None:
-        return {
-            "error":   "location_required",
-            "message": "Stop location (lat/lon) is required for prediction.",
-            "level":   None
-        }
-
-    # ── validate lat/lon are real numbers ─────────────────────
+    # ── validate lat/lon ──────────────────────────────────────
     try:
         stop_lat = float(stop_lat)
         stop_lon = float(stop_lon)
@@ -137,24 +139,18 @@ def predict(
             "level":   None
         }
 
+    if stop_lat is None or stop_lon is None:
+        return {
+            "error":   "location_required",
+            "message": "Stop location (lat/lon) is required for prediction.",
+            "level":   None
+        }
+
     # ── outside Durham Region ─────────────────────────────────
     if not _is_in_durham(stop_lat, stop_lon):
         return {
             "error":   "outside_service_area",
-            "message": f"Location ({stop_lat:.4f}, {stop_lon:.4f}) is outside Durham Region. We can only predict crowding for Durham Transit stops.",
-            "level":   None
-        }
-
-    # ── invalid boardings/alightings ──────────────────────────
-    try:
-        boardings  = float(boardings)
-        alightings = float(alightings)
-        if boardings < 0 or alightings < 0:
-            raise ValueError
-    except (TypeError, ValueError):
-        return {
-            "error":   "invalid_ridership",
-            "message": "Boardings and alightings must be non-negative numbers.",
+            "message": f"Location ({stop_lat:.4f}, {stop_lon:.4f}) is outside Durham Region.",
             "level":   None
         }
 
@@ -165,28 +161,28 @@ def predict(
         logger.warning("Could not count schools nearby: %s", e)
         schools_nearby = 0
 
-    # ── engineer features ─────────────────────────────────────
-    total_activity    = boardings + alightings
-    boarding_ratio    = boardings  / (total_activity + 1)
-    alighting_ratio   = alightings / (total_activity + 1)
-    activity_log      = np.log1p(total_activity)
+    # ── engineer features (must match train.py feature_columns exactly) ──
     is_morning_peak   = int(7  <= hour <= 9)
     is_afternoon_peak = int(16 <= hour <= 19)
     is_peak           = int(is_morning_peak or is_afternoon_peak)
 
-    peak_x_activity = is_peak * total_activity
-    peak_x_schools  = is_peak * schools_nearby
-    pop_x_activity  = population_density * activity_log
-    boarding_x_peak = boardings * is_peak
+    # Interactions — time + context only
+    peak_x_schools = is_peak            * schools_nearby
+    peak_x_routes  = is_peak            * route_count
+    pop_x_schools  = population_density * schools_nearby
+    pop_x_peak     = population_density * is_peak
+    weekend_x_peak = is_weekend         * is_peak
 
+    # ── feature order must match train.py feature_columns exactly ─
     features = np.array([[
-        boardings, alightings, total_activity,
-        boarding_ratio, alighting_ratio, activity_log,
-        route_count, hour, is_morning_peak,
-        is_afternoon_peak, is_peak, is_weekend,
-        population_density, schools_nearby,
-        peak_x_activity, peak_x_schools,
-        pop_x_activity, boarding_x_peak,
+        hour, is_morning_peak, is_afternoon_peak, is_peak,
+        day_of_week, is_weekend,
+        route_count,
+        population_density,
+        schools_nearby,
+        peak_x_schools, peak_x_routes,
+        pop_x_schools,  pop_x_peak,
+        weekend_x_peak,
     ]])
 
     # ── predict ───────────────────────────────────────────────
@@ -209,13 +205,13 @@ def predict(
     )
 
     return {
-        "level":           label_map[int(prediction)],
-        "confidence":      confidence,
-        "schools_nearby":  schools_nearby,
-        "stop_lat":        stop_lat,
-        "stop_lon":        stop_lon,
-        "hour":            hour,
-        "is_peak":         bool(is_peak),
+        "level":          label_map[int(prediction)],
+        "confidence":     confidence,
+        "schools_nearby": schools_nearby,
+        "stop_lat":       stop_lat,
+        "stop_lon":       stop_lon,
+        "hour":           hour,
+        "is_peak":        bool(is_peak),
         "probabilities": {
             "not_crowded": round(float(probabilities[0]), 3),
             "normal":      round(float(probabilities[1]), 3),

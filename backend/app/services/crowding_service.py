@@ -13,25 +13,22 @@ def get_predicted_crowding(
     stop_lat:     float,
     stop_lon:     float,
     departure_ts: int,
+    route_count:        int   = 1,
+    population_density: float = 1800.0,
 ) -> dict:
     dt         = datetime.fromtimestamp(departure_ts)
     hour       = dt.hour
-    is_weekend = int(dt.weekday() >= 5)
-
-    if 7 <= hour <= 9 or 16 <= hour <= 19:
-        boardings, alightings = 150.0, 80.0
-    elif 22 <= hour or hour <= 5:
-        boardings, alightings = 10.0, 5.0
-    else:
-        boardings, alightings = 50.0, 25.0
+    day_of_week = dt.weekday()
+    is_weekend  = int(day_of_week >= 5)
 
     result = predict(
-        boardings  = boardings,
-        alightings = alightings,
-        stop_lat   = stop_lat,
-        stop_lon   = stop_lon,
-        hour       = hour,
-        is_weekend = is_weekend,
+        stop_lat           = stop_lat,
+        stop_lon           = stop_lon,
+        hour               = hour,
+        is_weekend         = is_weekend,
+        day_of_week        = day_of_week,
+        route_count        = route_count,
+        population_density = population_density,
     )
 
     return {
