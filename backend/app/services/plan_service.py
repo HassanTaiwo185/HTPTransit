@@ -11,18 +11,10 @@ from app.data import store
 
 logger = logging.getLogger(__name__)
 
-# Only override the API's is_real_time if the leg departs more than
-# this many seconds from now. Within 30 minutes, trust the API —
-# buses are tracked and dispatched before their scheduled departure.
 LIVE_HORIZON_SECONDS = 30 * 60
 
 
-def _can_be_live(leg_start_time: int | None) -> bool:
-    """
-    Returns True if the leg is close enough to now that live tracking
-    is plausible. We trust the API's is_real_time value inside this window.
-    Outside it (future scheduled trip) we force is_real_time=False.
-    """
+def _can_be_live(leg_start_time):
     if not leg_start_time:
         return False
     seconds_until = leg_start_time - datetime.now().timestamp()
@@ -70,7 +62,7 @@ def _format_timestamp(ts):
 
 async def get_plan(from_lat, from_lon, to_lat, to_lon,
                    mode="transit", num_results=3,
-                   departure_time: int | None = None):
+                   departure_time=None):
 
     params = {
         "from_lat":               from_lat,
@@ -80,6 +72,7 @@ async def get_plan(from_lat, from_lon, to_lat, to_lon,
         "mode":                   mode,
         "num_result":             num_results,
         "should_update_realtime": True,
+        "max_num_departures":     3,
     }
 
     if departure_time is not None:
@@ -100,12 +93,13 @@ async def get_plan(from_lat, from_lon, to_lat, to_lon,
     for result in data.get("results", []):
         legs = []
         for leg in result.get("legs", []):
-            route           = None
-            global_route_id = None
-            headsign        = None
-            trip_id         = None
-            is_real_time    = False
-            stop_times      = []
+            route            = None
+            global_route_id  = None
+            headsign         = None
+            trip_id          = None
+            is_real_time     = False
+            stop_times       = []
+            next_departures  = []
 
             if leg.get("leg_mode") == "transit":
                 routes = leg.get("routes", [])
@@ -113,16 +107,13 @@ async def get_plan(from_lat, from_lon, to_lat, to_lon,
                     route           = routes[0].get("route_short_name", "")
                     global_route_id = routes[0].get("global_route_id", "")
 
-                leg_start   = leg.get("start_time")
-                plausible   = _can_be_live(leg_start)
+                leg_start = leg.get("start_time")
+                plausible = _can_be_live(leg_start)
 
                 departures = leg.get("departures", [])
                 if departures:
                     departure    = departures[0]
                     raw_realtime = departure.get("is_real_time", False)
-
-                    # Trust the API only when departure is within 30 minutes.
-                    # For anything further out, the API's live flag is noise.
                     is_real_time = raw_realtime and plausible
 
                     plan_details = departure.get("plan_details", {})
@@ -130,32 +121,41 @@ async def get_plan(from_lat, from_lon, to_lat, to_lon,
                     headsign     = arrival_item.get("trip_headsign")
 
                     for item in plan_details.get("stop_schedule_items", []):
-                        arrival_ts  = item.get("arrival_time")
-                        raw_stop_rt = item.get("is_real_time", False)
+                        arrival_ts = item.get("arrival_time")
                         stop_times.append({
                             "global_stop_id": item.get("global_stop_id", ""),
                             "arrival_time":   arrival_ts,
                             "stop_time":      _format_timestamp(arrival_ts),
-                            "is_real_time":   raw_stop_rt and plausible,
+                            "is_real_time":   item.get("is_real_time", False) and plausible,
                             "is_cancelled":   item.get("is_cancelled", False),
                         })
+
+                    # next 2 real departures for RouteStopSheet
+                    for dep in departures[1:3]:
+                        dep_ts = dep.get("departure_time") or dep.get("arrival_time")
+                        if dep_ts:
+                            next_departures.append({
+                                "start_time":   dep_ts,
+                                "is_real_time": dep.get("is_real_time", False) and plausible,
+                            })
 
                 if route:
                     trip_id = _find_trip_id_for_route(route, leg_start)
 
             legs.append({
-                "mode":            leg.get("leg_mode"),
-                "distance_m":      round(leg.get("distance", 0), 1),
-                "duration_min":    round(leg.get("duration", 0) / 60, 1),
-                "start_time":      leg.get("start_time"),
-                "end_time":        leg.get("end_time"),
-                "route":           route,
-                "global_route_id": global_route_id,
-                "trip_id":         trip_id,
-                "headsign":        headsign,
-                "is_real_time":    is_real_time,
-                "polyline":        leg.get("polyline", ""),
-                "stop_times":      stop_times,
+                "mode":             leg.get("leg_mode"),
+                "distance_m":       round(leg.get("distance", 0), 1),
+                "duration_min":     round(leg.get("duration", 0) / 60, 1),
+                "start_time":       leg.get("start_time"),
+                "end_time":         leg.get("end_time"),
+                "route":            route,
+                "global_route_id":  global_route_id,
+                "trip_id":          trip_id,
+                "headsign":         headsign,
+                "is_real_time":     is_real_time,
+                "polyline":         leg.get("polyline", ""),
+                "stop_times":       stop_times,
+                "next_departures":  next_departures,
             })
 
         plans.append({

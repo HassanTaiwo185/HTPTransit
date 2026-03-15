@@ -80,37 +80,7 @@ function App() {
       .catch(() => setTripStops([]));
   }, [selectedLeg]);
 
-  // vehicle polling — only when leg open, every 60s, stop immediately on close
-  useEffect(() => {
-    if (vehicleIntervalRef.current) {
-      clearInterval(vehicleIntervalRef.current);
-      vehicleIntervalRef.current = null;
-    }
-
-    if (!selectedLeg?.global_route_id) {
-      setVehicles([]);
-      return;
-    }
-
-    // initial fetch
-    getVehiclePositions(selectedLeg.global_route_id)
-      .then(data => setVehicles(data.vehicles || []))
-      .catch(() => setVehicles([]));
-
-    // poll every 60s — only 1 call/min
-    vehicleIntervalRef.current = setInterval(() => {
-      getVehiclePositions(selectedLeg.global_route_id)
-        .then(data => setVehicles(data.vehicles || []))
-        .catch(() => {});
-    }, 60000);
-
-    return () => {
-      if (vehicleIntervalRef.current) {
-        clearInterval(vehicleIntervalRef.current);
-        vehicleIntervalRef.current = null;
-      }
-    };
-  }, [selectedLeg?.global_route_id]);
+  
 
   const handleArrivalSelect = (arrival) => {
     const startTime = Math.floor(Date.now() / 1000) + Math.round(arrival.arrives_in_min * 60);

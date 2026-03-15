@@ -47,17 +47,18 @@ export default function RouteStopSheet({ leg, onClose, vehicles = [] }) {
     return new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
-  // Only use real departures — first from leg, rest from next_departures
+  // Build departures — only real data, mark departed if negative mins
   const nextDeps = leg?.next_departures || [];
   const departures = leg ? [
     {
+      rawMins:      Math.round((leg.start_time * 1000 - Date.now()) / 60000),
       mins:         Math.max(0, Math.round((leg.start_time * 1000 - Date.now()) / 60000)),
       is_real_time: leg.is_real_time,
       status:       leg.is_real_time ? 'Live' : 'Scheduled',
       start_time:   leg.start_time,
     },
-    // only include if real next_departures available
     ...nextDeps.slice(0, 2).map(dep => ({
+      rawMins:      Math.round((dep.start_time * 1000 - Date.now()) / 60000),
       mins:         Math.max(0, Math.round((dep.start_time * 1000 - Date.now()) / 60000)),
       is_real_time: dep.is_real_time ?? false,
       status:       dep.is_real_time ? 'Live' : 'Scheduled',
@@ -87,13 +88,12 @@ export default function RouteStopSheet({ leg, onClose, vehicles = [] }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leg?.trip_id]);
 
-  // ML crowding prediction — runs when stops load or departure changes
+  // ML crowding prediction
   useEffect(() => {
     if (!stops.length) return;
-    const stopId   = stops[0]?.stop_id;
-    const depTime  = departures[selectedDeparture]?.start_time || leg?.start_time;
+    const stopId  = stops[0]?.stop_id;
+    const depTime = departures[selectedDeparture]?.start_time || leg?.start_time;
     if (!stopId || !depTime) return;
-
     setCrowdingLevel(null);
     getCrowdingPrediction(stopId, depTime)
       .then(data => {
@@ -159,7 +159,7 @@ export default function RouteStopSheet({ leg, onClose, vehicles = [] }) {
       {/* Scrollable content */}
       <div className="overflow-y-auto flex-1 pb-6">
 
-        {/* Departures — only real ones */}
+        {/* Departures */}
         <div className="px-3 pt-3 pb-2">
           <div className="flex items-center justify-between mb-2 px-1">
             <span className="text-[12px] font-semibold text-gray-500 uppercase tracking-wide">
@@ -169,42 +169,68 @@ export default function RouteStopSheet({ leg, onClose, vehicles = [] }) {
               {departures.some(d => d.is_real_time) ? 'Real-time' : 'Scheduled'}
             </span>
           </div>
-          <div className={`grid gap-2 ${departures.length === 1 ? 'grid-cols-1' : departures.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
-            {departures.map((dep, i) => (
-              <button
-                key={i}
-                onClick={() => setSelectedDep(i)}
-                className={`rounded-2xl px-2 py-3.5 text-center transition-all border ${
-                  i === selectedDeparture
-                    ? 'bg-blue-600 border-blue-600 shadow-md shadow-blue-200'
-                    : 'bg-white border-gray-200 hover:border-blue-300 active:bg-blue-50'
-                }`}
-              >
-                <p className={`text-[17px] font-bold leading-none ${i === selectedDeparture ? 'text-white' : 'text-gray-900'}`}>
-                  {dep.mins}
-                </p>
-                <p className={`text-[10px] mt-0.5 ${i === selectedDeparture ? 'text-blue-200' : 'text-gray-400'}`}>
-                  min
-                </p>
-                <p className={`text-[11px] mt-1.5 font-medium ${i === selectedDeparture ? 'text-blue-100' : 'text-gray-500'}`}>
-                  {formatTime(dep.start_time)}
-                </p>
-                <p className={`text-[10px] mt-0.5 font-semibold uppercase tracking-wide ${
-                  dep.is_real_time
-                    ? i === selectedDeparture ? 'text-green-300' : 'text-green-500'
-                    : i === selectedDeparture ? 'text-blue-300'  : 'text-gray-400'
-                }`}>
-                  {dep.status}
-                </p>
-              </button>
-            ))}
+          <div className={`grid gap-2 ${
+            departures.length === 1 ? 'grid-cols-1' :
+            departures.length === 2 ? 'grid-cols-2' : 'grid-cols-3'
+          }`}>
+            {departures.map((dep, i) => {
+              const departed = dep.rawMins < 0;
+              const isSelected = i === selectedDeparture;
+              return (
+                <button
+                  key={i}
+                  onClick={() => setSelectedDep(i)}
+                  className={`rounded-2xl px-2 py-3.5 text-center transition-all border ${
+                    isSelected
+                      ? departed ? 'bg-gray-400 border-gray-400' : 'bg-blue-600 border-blue-600 shadow-md shadow-blue-200'
+                      : departed ? 'bg-gray-50 border-gray-200 opacity-60' : 'bg-white border-gray-200 hover:border-blue-300 active:bg-blue-50'
+                  }`}
+                >
+                  {departed ? (
+                    <>
+                      <p className={`text-[13px] font-bold leading-none ${isSelected ? 'text-white' : 'text-gray-400'}`}>
+                        Dep.
+                      </p>
+                      <p className={`text-[10px] mt-1 ${isSelected ? 'text-gray-200' : 'text-gray-400'}`}>
+                        {formatTime(dep.start_time)}
+                      </p>
+                      <p className={`text-[10px] mt-0.5 font-semibold uppercase ${isSelected ? 'text-gray-300' : 'text-gray-400'}`}>
+                        Departed
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className={`text-[17px] font-bold leading-none ${isSelected ? 'text-white' : 'text-gray-900'}`}>
+                        {dep.mins}
+                      </p>
+                      <p className={`text-[10px] mt-0.5 ${isSelected ? 'text-blue-200' : 'text-gray-400'}`}>
+                        min
+                      </p>
+                      <p className={`text-[11px] mt-1.5 font-medium ${isSelected ? 'text-blue-100' : 'text-gray-500'}`}>
+                        {formatTime(dep.start_time)}
+                      </p>
+                      <p className={`text-[10px] mt-0.5 font-semibold uppercase tracking-wide ${
+                        dep.is_real_time
+                          ? isSelected ? 'text-green-300' : 'text-green-500'
+                          : isSelected ? 'text-blue-300'  : 'text-gray-400'
+                      }`}>
+                        {dep.status}
+                      </p>
+                    </>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
 
         {/* Departs info bar with ML crowding */}
         <div className="mx-3 mb-3 px-4 py-2.5 bg-blue-50 rounded-xl flex items-center justify-between border border-blue-100">
           <span className="text-[12px] font-semibold text-blue-700">
-            Departs {formatTime(activeDeparture?.start_time)}
+            {activeDeparture?.rawMins < 0
+              ? `Departed at ${formatTime(activeDeparture?.start_time)}`
+              : `Departs ${formatTime(activeDeparture?.start_time)}`
+            }
           </span>
           {crowding ? (
             <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${crowding.color}`}>
