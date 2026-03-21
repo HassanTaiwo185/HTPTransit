@@ -1,161 +1,177 @@
 HTPTransit — Intelligent Transit Backend
-HTPTransit is a backend service built with FastAPI, Uvicorn, and a lightweight machine‑learning pipeline to support real‑time and predictive transit features. It includes automated setup, model training, geocoding utilities, and a modern frontend stack powered by Tailwind CSS and MapLeaf.
 
-🚀 Overview
-HTPTransit provides:
+HTPTransit is a real-time + predictive transit backend built with FastAPI that combines:
 
-A FastAPI backend with auto‑generated API docs
+🛰️ Live transit data (Transit API)
+📊 Static GTFS data (in-memory fallback)
+🤖 Machine Learning crowding prediction
+🌍 Geospatial intelligence (population density)
 
-Real‑time server via Uvicorn
+It is designed to simulate a modern transit system backend with real-time updates, route planning, and predictive insights.
 
-Machine‑learning model training (scikit‑learn)
+🚀 Features
+🕒 Real-Time Arrivals
+Fetches live arrivals from Transit API
+Fallback to static GTFS if API fails
+Returns:
+Next arrival
+Next 2–3 departures
+Real-time status
+📍 Nearby Stops
+Finds stops within a radius using Haversine formula
+Fully in-memory (no database)
+Sorted by closest distance
+🛣 Trip Stop Sequences
+Returns ordered stops for a trip
+Uses GTFS stop_times
+🧭 Route Planning
+Multi-leg journey planning
+Includes:
+Transit + walking legs
+Stop-by-stop schedule
+Real-time validation (≤ 30 min window)
+Next departures per leg
+🤖 Crowding Prediction (ML)
 
-Automated geocoding for Durham school locations
+Predicts bus crowding level:
 
-Websocket support
+not_crowded
+normal
+overcrowded
 
-Frontend tooling (Tailwind CSS + MapLeaf already configured)
+Uses:
 
-A one‑command setup script (setup.sh) that installs dependencies, prepares environment variables, trains the ML model, geocodes data, and launches the server
+Time of day
+Day of week
+Route count
+Population density (Stats Canada)
+Nearby schools
+🤖 Machine Learning Overview
+🎯 Goal
 
+Predict crowding without using passenger counts at runtime.
+
+🧮 Target Labels
+
+Derived from CTA (Chicago) data:
+
+Label	Class	Condition
+0	not_crowded	< 50% capacity
+1	normal	50% – 85%
+2	overcrowded	> 85%
+net_passengers = boardings - alightings
+crowding_ratio = net_passengers / 50
+🧠 Features (No Leakage)
+
+Only time + location + context:
+
+Time
+
+hour
+peak hours (7–9 AM, 4–7 PM)
+weekend / weekday
+
+Location
+
+latitude / longitude
+population density (Stats Canada DA)
+
+Context
+
+route count
+nearby schools
+interaction features
+⚙️ Models
+Model	Purpose
+Random Forest	Baseline
+XGBoost	Final model (best performance)
+Stratified train/val/test split
+5-fold cross-validation
+Feature scaling applied
+📊 Output
+model.pkl → trained model
+scaler.pkl → feature scaler
+model_metadata.pkl → config + metrics
+confusion_matrix.png
+feature_importance.png
+🌍 Geospatial Intelligence
+Uses Stats Canada Dissemination Areas
+Maps each stop → real population density
+Implemented with:
+GeoPandas
+Shapely (point-in-polygon)
+🧱 System Architecture
+Client (React + Map)
+        ↓
+FastAPI Backend
+        ↓
+ ┌──────────────────────────┐
+ │ Transit API (real-time)  │
+ └──────────────────────────┘
+        ↓
+ ┌──────────────────────────┐
+ │ GTFS In-Memory Store     │
+ └──────────────────────────┘
+        ↓
+ ┌──────────────────────────┐
+ │ ML Prediction Layer      │
+ └──────────────────────────┘
 📦 Tech Stack
 Backend
 FastAPI
-
 Uvicorn
-
 WebSockets
-
-SlowAPI (rate limiting)
-
-Pydantic v2
-
 HTTPX
-
-python‑multipart
-
+SlowAPI (rate limiting)
+Pydantic
+Data
+GTFS (in-memory)
+Transit API
 Machine Learning
-scikit‑learn
-
-pandas
-
-numpy
-
-Frontend
-Tailwind CSS (preconfigured)
-
-MapLeaf (preconfigured)
-
-npm for package management
-
+scikit-learn
+XGBoost
+pandas / numpy
+Geospatial
+GeoPandas
+Shapely
+Frontend (preconfigured)
+Tailwind CSS
+MapLeaf
 🛠 Installation & Setup
-1. Clone the repository
-bash
+1. Clone Repo
 git clone https://github.com/HassanTaiwo185/HTPTransit
 cd HTPTransit
-🐍 Backend Setup
-2. Install Python dependencies
-bash
+2. Install Backend Dependencies
 pip install -r requirements.txt
-Or manually:
-
-bash
-pip install fastapi==0.111.0 uvicorn[standard]==0.29.0 websockets==12.0 scikit-learn==1.4.2 pandas==2.2.2 numpy==1.26.4 python-multipart==0.0.9 pydantic==2.7.1 httpx==0.27.0 slowapi==0.1.9
-🌐 Frontend Setup
-3. Install Node dependencies
-bash
+3. Install Frontend Dependencies
 npm install
-Tailwind CSS
-Tailwind is already configured in the project.
-All required files (tailwind.config.js, postcss.config.js, CSS imports) are included.
-No extra setup is required.
+4. Environment Variables
 
-MapLeaf
-MapLeaf is also already set up.
-Just ensure dependencies are installed:
+Create .env:
 
-bash
-npm install mapleaf
-No additional configuration is needed unless customizing the map.
-
-🔑 Environment Variables
-Create a .env file:
-
-Code
-TRANSIT_API_KEY=your_key_here
-If .env is missing, the setup script will generate one automatically and prompt you to add your API key.
-
-⚙️ One‑Command Setup (Recommended)
-Run the automated setup script:
-
-bash
+TRANSIT_API_KEY=your_api_key
+TRANSIT_BASE_URL=https://external.transitapp.com/v3
+▶️ Run the App
+Option 1 (Recommended)
 bash setup.sh
-This script will:
 
-Check Python installation
+This will:
 
-Install backend dependencies
-
-Create or validate .env
-
-Train the ML model (if missing)
-
-Geocode Durham school locations (if missing)
-
-Start the FastAPI server
-
-▶️ Running the Server Manually
-bash
+Install dependencies
+Train ML model (if missing)
+Load geospatial data
+Start server
+Option 2 (Manual)
+Step 1 — Train ML Model
+python3 app/ml/train.py
+Step 2 — Start Server
 uvicorn app.main:app --reload
-Server will start at:
-
-API Root: http://localhost:8000
-
-API Docs: http://localhost:8000/docs
-
-📁 Project Structure
-Code
-HTPTransit/
-│
-├── app/
-│   ├── main.py           # FastAPI entry point
-│   ├── ml/
-│   │   ├── train.py      # ML model training script
-│   │   └── model.pkl     # Generated model
-│   └── ...
-│
-├── data/
-│   └── durham_schools_geocoded.csv
-│
-├── ml/
-│   └── geocode_schools.py
-│
-├── setup.sh              # Automated setup script
-├── requirements.txt
-└── README.md
-🤖 Machine Learning Pipeline
-The ML component:
-
-Loads transit‑related datasets
-
-Trains a predictive model using scikit‑learn
-
-Saves the model to app/ml/model.pkl
-
-Automatically retrains if the model is missing
-
-🗺 Geocoding
-The script ml/geocode_schools.py:
-
-Fetches coordinates for Durham schools
-
-Saves results to data/durham_schools_geocoded.csv
-
-Automatically runs during setup if the file is missing
-
-🧪 Testing the API
-Once the server is running, visit:
-
-Code
-http://localhost:8000/docs
-You can test all endpoints interactively using Swagger UI. 
+🌐 Access API
+API → http://localhost:8000
+Docs → http://localhost:8000/docs
+🧪 Example Capabilities
+Get nearby stops
+Get live arrivals
+View trip stop sequence
+Plan routes
+Predict crowding per stop
